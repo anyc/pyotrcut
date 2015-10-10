@@ -1,0 +1,141 @@
+#! /usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Author: Mario Kicherer (dev@kicherer.org)
+# License: GPL v2 (http://www.gnu.org/licenses/gpl-2.0.txt)
+#
+
+
+import urllib.request
+import sys, os, argparse
+import xml.etree.ElementTree as ET
+import configparser, subprocess
+from decimal import Decimal as Dec
+
+
+parser = argparse.ArgumentParser(description='')
+parser.add_argument('-s', dest='start_offset', help='Add offset in seconds to start of a video snippet', type=float, action='store')
+parser.add_argument("filename", action='store')
+args = parser.parse_args()
+
+start_offset = float(args.start_offset)
+
+if "AVCUT" in os.environ:
+	avcut = os.environ["AVCUT"]
+else:
+	avcut = "avcut"
+
+#filename = sys.argv[1]
+filename = args.filename
+statinfo = os.stat(filename)
+size = statinfo.st_size
+
+name = os.path.basename(filename)
+
+# get a list of cutfiles for this recording
+result = urllib.request.urlopen("http://www.cutlist.at/getxml.php?name=%s&ofsb=%s" % (name, size) ).readlines()
+
+# dump response
+#print(result)
+
+# parse XML
+tree = ET.fromstring(b''.join(result))
+
+# dump cutlists
+i=1
+for cutlist in tree:
+	print("cutlist #%s:" % i),
+	for e in cutlist:
+		print("%24s %s" % (e.tag, e.text))
+	print("")
+	i+=1
+
+# show selection dialog
+print("filename (author rating/rcount #downloads)")
+
+best_rating = 0
+i_best_rating = 0
+i=1
+for cutlist in tree:
+	print("%d. " % i, end="")
+	
+	e = cutlist.find("filename")
+	print("%32s " % e.text, end="")
+	
+	author = cutlist.find("author").text
+	rating = cutlist.find("rating").text
+	if rating and float(rating) > best_rating:
+		best_rating = float(rating)
+		i_best_rating = i
+	ratingcount = cutlist.find("ratingcount").text
+	n_downloads = cutlist.find("downloadcount").text
+	n_cuts = cutlist.find("cuts").text
+	print("(%s %s/%s %s %s) " % (author, rating, ratingcount, n_downloads, n_cuts), end="")
+	
+	print("")
+	i+=1
+
+print("")
+sel = input("Select cutlist (default=%d): " % i_best_rating)
+
+if sel.strip() == "":
+	sel = "%d" % i_best_rating;
+
+# get ID for selected cutlist
+idx = tree[int(sel)-1].find("id").text
+
+# request detailed cutlist
+result = urllib.request.urlopen( "http://www.cutlist.at/getfile.php?id=%s" % (idx) ).readlines()
+
+# show cutlist
+print("")
+print(b''.join(result).decode("iso8859-1"))
+print("")
+
+config = configparser.ConfigParser()
+config.read_string(b''.join(result).decode("iso8859-1"))
+
+# check if author provided a suggested filename else fallback to original filename
+suggest = config["Info"]["SuggestedMovieName"]
+if suggest.strip() == "":
+	suggest = name
+
+if suggest[-4] != ".":
+	suggest = suggest + ".mkv"
+else:
+	if suggest[-3:] != "mkv":
+		# avcut works best with a Matroska container
+		suggest = suggest[:-3] + "mkv"
+
+sel = input("Output file (press enter for \"%s\"): " % (suggest));
+if sel.strip() == "":
+	outname = suggest
+else:
+	outname = sel
+
+cuts = config["General"]["NoOfCuts"]
+last = 0
+blacklist = ""
+
+# calculate blacklist (range we want to remove) from provided whitelist (ranges we want to keep)
+# as avcut expects the ranges we want to remove as arguments
+for c in range(int(cuts)):
+	start = Dec(config["Cut%d" % c]["Start"]) + Dec(start_offset)
+	duration = Dec(config["Cut%d" % c]["Duration"]) - Dec(start_offset)
+	
+	#startf = config["Cut%d" % c]["StartFrame"]
+	#durationf = config["Cut%d" % c]["DurationFrames"]
+	
+	blacklist += "%.2f %.2f " % (last, start)
+	last = start + duration
+
+# TODO: determine length
+blacklist += "%.2f %.2f " % (last, 999999999)
+
+command = "%s \"%s\" \"%s\" %s" %(avcut, filename, outname, blacklist)
+
+print("Executing: %s" % command)
+subprocess.call(command, shell=True)
+
+
+
