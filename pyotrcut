@@ -18,7 +18,10 @@ parser.add_argument('-s', dest='start_offset', help='Add offset in seconds to st
 parser.add_argument("filename", action='store')
 args = parser.parse_args()
 
-start_offset = float(args.start_offset)
+if args.start_offset:
+	start_offset = float(args.start_offset)
+else:
+	start_offset = 0.0
 
 if "AVCUT" in os.environ:
 	avcut = os.environ["AVCUT"]
@@ -37,6 +40,10 @@ result = urllib.request.urlopen("http://www.cutlist.at/getxml.php?name=%s&ofsb=%
 
 # dump response
 #print(result)
+if len(result) < 1:
+	print("no cutlists found for \"%s\"" % name)
+	print("query: %s" % ("http://www.cutlist.at/getxml.php?name=%s&ofsb=%s" % (name, size)))
+	sys.exit(1);
 
 # parse XML
 tree = ET.fromstring(b''.join(result))
@@ -51,10 +58,10 @@ for cutlist in tree:
 	i+=1
 
 # show selection dialog
-print("filename (author rating/rcount #downloads)")
+print("filename (author rating/rcount #downloads #cuts)")
 
 best_rating = 0
-i_best_rating = 0
+i_best_rating = 1
 i=1
 for cutlist in tree:
 	print("%d. " % i, end="")
