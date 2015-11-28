@@ -12,6 +12,16 @@ import xml.etree.ElementTree as ET
 import configparser, subprocess
 from decimal import Decimal as Dec
 
+error_array = ["start missing", "end missing", "errors in video", "errors in audio",
+			"av async", "EPG error"]
+
+def errors2str(errors):
+	res = ""
+	for i in range(len(error_array)):
+		if errors[i] == "1":
+			res += error_array[i] + ", "
+	
+	return res[:-2]
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('-s', dest='start_offset', help='Add offset in seconds to start of a video snippet', type=float, action='store')
@@ -78,6 +88,8 @@ for cutlist in tree:
 	n_downloads = cutlist.find("downloadcount").text
 	n_cuts = cutlist.find("cuts").text
 	print("(%s %s/%s %s %s) " % (author, rating, ratingcount, n_downloads, n_cuts), end="")
+	
+	print("\x1B[31;40m%s\x1B[0m" % errors2str(cutlist.find("errors").text), end="")
 	
 	print("")
 	i+=1
