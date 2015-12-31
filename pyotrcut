@@ -126,6 +126,10 @@ else:
 		# avcut works best with a Matroska container
 		suggest = suggest[:-3] + "mkv"
 
+# add info to filename if something is wrong with the video
+if tree[int(sel)-1].find("errors").text.strip() != "000000":
+	suggest = "%s (%s).mkv" % (suggest[:-4], errors2str(tree[int(sel)-1].find("errors").text))
+
 sel = input("Output file (press enter for \"%s\"): " % (suggest));
 if sel.strip() == "":
 	outname = suggest
@@ -148,8 +152,7 @@ for c in range(int(cuts)):
 	blacklist += "%.2f %.2f " % (last, start)
 	last = start + duration
 
-# TODO: determine length
-blacklist += "%.2f %.2f " % (last, 999999999)
+blacklist += "%.2f - " % (last)
 
 command = "%s \"%s\" \"%s\" %s" %(avcut, filename, outname, blacklist)
 
