@@ -25,6 +25,7 @@ def errors2str(errors):
 
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('-s', dest='start_offset', help='Add offset in seconds to start of a video snippet', type=float, action='store')
+parser.add_argument('-c', dest='cutlist', help='Read the cutlist from this file', action='store')
 parser.add_argument("filename", action='store')
 args = parser.parse_args()
 
@@ -38,81 +39,96 @@ if "AVCUT" in os.environ:
 else:
 	avcut = "avcut"
 
-#filename = sys.argv[1]
 filename = args.filename
 statinfo = os.stat(filename)
 size = statinfo.st_size
 
 name = os.path.basename(filename)
 
-# get a list of cutfiles for this recording
-result = urllib.request.urlopen("http://www.cutlist.at/getxml.php?name=%s&ofsb=%s" % (name, size) ).readlines()
+if not args.cutlist:
+	requests = [
+			"http://www.cutlist.at/getxml.php?name=%s&ofsb=%s" % (name, size),
+			"http://www.cutlist.at/getxml.php?ofsb=%s" % (size)
+			]
+	
+	for req in requests:
+		# get a list of cutfiles for this recording
+		result = urllib.request.urlopen(req).readlines()
+		
+		if len(result) > 0:
+			break;
+	
+	if len(result) < 1:
+		print("no cutlists found for \"%s\"" % name)
+		print("queries: ")
+		for req in requests:
+			print("\t%s" % (req))
+		sys.exit(1);
+	
+	# parse XML
+	tree = ET.fromstring(b''.join(result))
+	
+	# dump cutlists
+	i=1
+	for cutlist in tree:
+		print("cutlist #%s:" % i),
+		for e in cutlist:
+			print("%24s %s" % (e.tag, e.text))
+		print("")
+		i+=1
 
-# dump response
-#print(result)
-if len(result) < 1:
-	print("no cutlists found for \"%s\"" % name)
-	print("query: %s" % ("http://www.cutlist.at/getxml.php?name=%s&ofsb=%s" % (name, size)))
-	sys.exit(1);
+	# show selection dialog
+	print("filename (author rating/rcount #downloads #cuts)")
 
-# parse XML
-tree = ET.fromstring(b''.join(result))
+	best_rating = 0
+	i_best_rating = 1
+	i=1
+	for cutlist in tree:
+		print("%d. " % i, end="")
+		
+		e = cutlist.find("filename")
+		print("%32s " % e.text, end="")
+		
+		author = cutlist.find("author").text
+		rating = cutlist.find("rating").text
+		if rating and float(rating) > best_rating:
+			best_rating = float(rating)
+			i_best_rating = i
+		ratingcount = cutlist.find("ratingcount").text
+		n_downloads = cutlist.find("downloadcount").text
+		n_cuts = cutlist.find("cuts").text
+		print("(%s %s/%s %s %s) " % (author, rating, ratingcount, n_downloads, n_cuts), end="")
+		
+		print("\x1B[31;40m%s\x1B[0m" % errors2str(cutlist.find("errors").text), end="")
+		
+		print("")
+		i+=1
 
-# dump cutlists
-i=1
-for cutlist in tree:
-	print("cutlist #%s:" % i),
-	for e in cutlist:
-		print("%24s %s" % (e.tag, e.text))
 	print("")
-	i+=1
+	sel = input("Select cutlist (default=%d): " % i_best_rating)
 
-# show selection dialog
-print("filename (author rating/rcount #downloads #cuts)")
+	if sel.strip() == "":
+		sel = "%d" % i_best_rating;
 
-best_rating = 0
-i_best_rating = 1
-i=1
-for cutlist in tree:
-	print("%d. " % i, end="")
-	
-	e = cutlist.find("filename")
-	print("%32s " % e.text, end="")
-	
-	author = cutlist.find("author").text
-	rating = cutlist.find("rating").text
-	if rating and float(rating) > best_rating:
-		best_rating = float(rating)
-		i_best_rating = i
-	ratingcount = cutlist.find("ratingcount").text
-	n_downloads = cutlist.find("downloadcount").text
-	n_cuts = cutlist.find("cuts").text
-	print("(%s %s/%s %s %s) " % (author, rating, ratingcount, n_downloads, n_cuts), end="")
-	
-	print("\x1B[31;40m%s\x1B[0m" % errors2str(cutlist.find("errors").text), end="")
-	
+	# get ID for selected cutlist
+	idx = tree[int(sel)-1].find("id").text
+
+	# request detailed cutlist
+	result = urllib.request.urlopen( "http://www.cutlist.at/getfile.php?id=%s" % (idx) ).readlines()
+
+	cutlist_str = b''.join(result).decode("iso8859-1")
+
+	# show cutlist
 	print("")
-	i+=1
-
-print("")
-sel = input("Select cutlist (default=%d): " % i_best_rating)
-
-if sel.strip() == "":
-	sel = "%d" % i_best_rating;
-
-# get ID for selected cutlist
-idx = tree[int(sel)-1].find("id").text
-
-# request detailed cutlist
-result = urllib.request.urlopen( "http://www.cutlist.at/getfile.php?id=%s" % (idx) ).readlines()
-
-# show cutlist
-print("")
-print(b''.join(result).decode("iso8859-1"))
-print("")
+	print(cutlist_str)
+	print("")
+	
+else:
+	f = open(args.cutlist)
+	cutlist_str = f.read()
 
 config = configparser.ConfigParser()
-config.read_string(b''.join(result).decode("iso8859-1"))
+config.read_string(cutlist_str)
 
 # check if author provided a suggested filename else fallback to original filename
 suggest = config["Info"]["SuggestedMovieName"]
@@ -126,9 +142,23 @@ else:
 		# avcut works best with a Matroska container
 		suggest = suggest[:-3] + "mkv"
 
-# add info to filename if something is wrong with the video
-if tree[int(sel)-1].find("errors").text.strip() != "000000":
-	suggest = "%s (%s).mkv" % (suggest[:-4], errors2str(tree[int(sel)-1].find("errors").text))
+if config["Info"]["EPGError"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], error_array[5])
+
+if config["Info"]["MissingBeginning"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], error_array[0])
+
+if config["Info"]["MissingEnding"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], error_array[1])
+
+if config["Info"]["MissingVideo"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], error_array[2])
+
+if config["Info"]["MissingAudio"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], error_array[3])
+
+if config["Info"]["OtherError"] != "0":
+	suggest = "%s (%s).mkv" % (suggest[:-4], config["Info"]["OtherErrorDescription"])
 
 sel = input("Output file (press enter for \"%s\"): " % (suggest));
 if sel.strip() == "":
