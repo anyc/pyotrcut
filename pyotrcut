@@ -124,7 +124,7 @@ if not args.cutlist:
 	print("")
 	
 else:
-	f = open(args.cutlist)
+	f = open(args.cutlist, encoding="ISO-8859-1")
 	cutlist_str = f.read()
 
 config = configparser.ConfigParser()
