@@ -184,7 +184,7 @@ for c in range(int(cuts)):
 
 blacklist += "%.2f - " % (last)
 
-command = "%s \"%s\" \"%s\" %s" %(avcut, filename, outname, blacklist)
+command = "%s -i \"%s\" -o \"%s\" %s" %(avcut, filename, outname, blacklist)
 
 print("Executing: %s" % command)
 subprocess.call(command, shell=True)
